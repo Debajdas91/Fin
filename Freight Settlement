@@ -1,0 +1,1278 @@
+*&---------------------------------------------------------------------*
+*& Report ZFIN_R_FREIGHT_SETTLEMENT
+*&---------------------------------------------------------------------*
+*&
+*&---------------------------------------------------------------------*
+*&---------------------------------------------------------------------*
+*& DD ID        :                                                      *
+*& FS ID        :                                                      *
+*& User Stories : EWOW-35979                                           *
+*& Work Item    : 8000002137
+*&---------------------------------------------------------------------*
+*& Unallocated freight cost write off programme                        *
+*&---------------------------------------------------------------------*
+*& Transport: DA1K957018
+*&---------------------------------------------------------------------*
+*& Change Log:                                                         *
+*&---------------------------------------------------------------------*
+*& Author      ¦ Date           ¦ Comment                              *
+*&---------------------------------------------------------------------*
+*&*DEHVEDV      15/03/2023    : Initial Version                        *
+*&---------------------------------------------------------------------*
+*post unallocated freight cost to respective BU by Profitcenter and
+*G/l Accounts combination.                                             *
+*&---------------------------------------------------------------------*
+REPORT zfin_r_freight_settlement.
+
+INCLUDE zfin_freig_settl_top.
+INCLUDE zfin_freig_settl_sel.
+
+START-OF-SELECTION.
+  go_obj = NEW zfin_cl_freight_settlement( it_bukrs  = s_bukrs[]
+                                           iv_gjahr  = p_gjahr
+                                           iv_period = p_poper ).
+
+  go_obj->fetch_data( IMPORTING et_data = DATA(lt_po_amount) ).
+  IF lt_po_amount IS NOT  INITIAL.
+    CALL SCREEN '300'.
+  ELSE.
+    MESSAGE ID 'ZFINANCE' TYPE 'E' NUMBER 193.
+  ENDIF.
+*&---------------------------------------------------------------------*
+*& Module STATUS_0300 OUTPUT
+*&---------------------------------------------------------------------*
+*&
+*&---------------------------------------------------------------------*
+
+
+MODULE status_0300 OUTPUT.
+
+  SET PF-STATUS 'ZPOSTATUS'.
+  "PREPARE THE FIELD CATALOGUE FOR FIRST SCREEN
+  CLEAR : lv_pos,lt_fcat3,ls_fcat3.
+  ls_fcat3-col_pos = lv_pos + 1.
+  lv_pos = lv_pos + 1.
+  ls_fcat3-fieldname = 'INDEX'.
+  ls_fcat3-reptext = 'Index'.
+  APPEND ls_fcat3 TO lt_fcat3.
+
+  ls_fcat3-col_pos = lv_pos + 1.
+  lv_pos = lv_pos + 1.
+  ls_fcat3-fieldname = 'BUKRS'.
+  ls_fcat3-reptext = 'Company Code'.
+  APPEND ls_fcat3 TO lt_fcat3.
+
+  ls_fcat3-col_pos = lv_pos + 1.
+  lv_pos = lv_pos + 1.
+  ls_fcat3-fieldname = 'EBELN'.
+  ls_fcat3-reptext = 'Purchasingdocumnet'.
+  APPEND ls_fcat3 TO lt_fcat3.
+
+  ls_fcat3-col_pos = lv_pos + 1.
+  lv_pos = lv_pos + 1.
+  ls_fcat3-fieldname = 'HSL'.
+  ls_fcat3-reptext = 'Amount'.
+  ls_fcat3-do_sum = abap_true.
+  APPEND ls_fcat3 TO lt_fcat3.
+
+  ls_fcat3-col_pos = lv_pos + 1.
+  lv_pos = lv_pos + 1.
+  ls_fcat3-fieldname = 'RHCUR'.
+  ls_fcat3-reptext = 'Currency'.
+  ls_fcat3-do_sum = abap_true.
+  APPEND ls_fcat3 TO lt_fcat3.
+
+  ls_fcat3-col_pos = lv_pos + 1.
+  lv_pos = lv_pos + 1.
+  ls_fcat3-fieldname = 'DOC_POSTED'.
+  ls_fcat3-reptext = TEXT-007.
+  ls_fcat3-do_sum = abap_true.
+  ls_fcat3-outputlen = '40'.
+  APPEND ls_fcat3 TO lt_fcat3.
+
+  IF lo_cust2 IS INITIAL.
+    CREATE OBJECT lo_cust2
+      EXPORTING
+        container_name              = 'CUST2'
+      EXCEPTIONS
+        cntl_error                  = 1
+        cntl_system_error           = 2
+        create_error                = 3
+        lifetime_error              = 4
+        lifetime_dynpro_dynpro_link = 5
+        OTHERS                      = 6.
+    IF sy-subrc <> 0.
+      MESSAGE ID sy-msgid TYPE sy-msgty NUMBER sy-msgno
+                 WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4.
+    ENDIF.
+  ENDIF.
+  IF lo_alv2 IS BOUND.
+    lo_alv2->refresh_table_display( ).
+  ELSE.
+    IF lo_cust2 IS NOT INITIAL.
+      CREATE OBJECT lo_alv2
+        EXPORTING
+          i_parent          = lo_cust2
+        EXCEPTIONS
+          error_cntl_create = 1
+          error_cntl_init   = 2
+          error_cntl_link   = 3
+          error_dp_create   = 4
+          OTHERS            = 5.
+      IF sy-subrc <> 0.
+        MESSAGE ID sy-msgid TYPE sy-msgty NUMBER sy-msgno
+                   WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4.
+      ENDIF.
+    ENDIF.
+*
+  ENDIF.
+
+  sort-fieldname = 'RHCUR'.
+  sort-up = 'X'.
+  sort-subtot = 'X'.
+  APPEND sort TO lt_sort.
+
+  IF lo_alv2 IS NOT INITIAL.
+    CALL METHOD lo_alv2->set_table_for_first_display
+      EXPORTING
+        i_structure_name              = 'TY_PO_AMOUNT'
+        i_save                        = 'A'
+      CHANGING
+        it_outtab                     = lt_po_amount
+        it_fieldcatalog               = lt_fcat3
+      EXCEPTIONS
+        invalid_parameter_combination = 1
+        program_error                 = 2
+        too_many_lines                = 3
+        OTHERS                        = 4.
+    IF sy-subrc <> 0.
+* Implement suitable error handling here
+      CLEAR :  lt_fcat3.
+    ENDIF.
+  ENDIF.
+ENDMODULE.
+
+*&-----------------------------------------------*
+*& Module STATUS_0100 OUTPUT
+*&---------------------------------------------------------------------*
+*&
+*&---------------------------------------------------------------------*
+MODULE status_0100 OUTPUT.
+  SET PF-STATUS 'ZPFSTATUS'.
+  SET TITLEBAR 'ZTITLE' WITH TEXT-t02.
+
+  DATA : ls_variant TYPE disvariant.
+  IF lo_cust IS INITIAL.
+    CREATE OBJECT lo_cust
+      EXPORTING
+        container_name              = 'CUST'
+      EXCEPTIONS
+        cntl_error                  = 1
+        cntl_system_error           = 2
+        create_error                = 3
+        lifetime_error              = 4
+        lifetime_dynpro_dynpro_link = 5
+        OTHERS                      = 6.
+    IF sy-subrc <> 0.
+      MESSAGE ID sy-msgid TYPE sy-msgty NUMBER sy-msgno
+                 WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4.
+    ENDIF.
+  ENDIF.
+
+  IF lo_alv IS BOUND.
+
+    lo_alv->refresh_table_display( ).
+  ELSE.
+    IF lo_cust IS NOT INITIAL.
+      CREATE OBJECT lo_alv
+        EXPORTING
+          i_parent          = lo_cust
+        EXCEPTIONS
+          error_cntl_create = 1
+          error_cntl_init   = 2
+          error_cntl_link   = 3
+          error_dp_create   = 4
+          OTHERS            = 5.
+      IF sy-subrc <> 0.
+        MESSAGE ID sy-msgid TYPE sy-msgty NUMBER sy-msgno
+                   WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4.
+      ENDIF.
+
+      CALL METHOD lo_alv->register_edit_event
+        EXPORTING
+          i_event_id = cl_gui_alv_grid=>mc_evt_modified.
+    ENDIF.
+  ENDIF.
+
+  IF lo_cust IS NOT INITIAL.
+
+    IF lo_alv IS NOT INITIAL.
+      IF <t_dyntable> IS NOT INITIAL.
+        CALL METHOD lo_alv->set_table_for_first_display
+          EXPORTING
+            i_save                        = 'A'
+          CHANGING
+            it_outtab                     = <t_dyntable>
+            it_fieldcatalog               = lt_fcat1
+          EXCEPTIONS
+            invalid_parameter_combination = 1
+            program_error                 = 2
+            too_many_lines                = 3
+            OTHERS                        = 4.
+        IF sy-subrc <> 0.
+* Implement suitable error handling here
+          CLEAR : lt_fcat1.
+        ENDIF.
+      ELSE.
+        MESSAGE 'No data exist'(002) TYPE 'E'.
+      ENDIF.
+    ENDIF.
+  ENDIF.
+ENDMODULE.
+*&---------------------------------------------------------------------*
+*&      Module  USER_COMMAND_0300  INPUT
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+MODULE user_command_0300 INPUT.
+  DATA(lv_ucomm1) = sy-ucomm. " fucntion key action
+  CASE lv_ucomm1.
+    WHEN 'EXECUTE'.
+      PERFORM calculations." CHANGING gv_sum.
+    WHEN 'EDIT_PO'.
+      PERFORM edit_podata.
+    WHEN 'CANCEL' OR 'EXIT'.
+      LEAVE PROGRAM.
+    WHEN 'BACK'.
+      LEAVE PROGRAM.
+      LEAVE SCREEN.
+    WHEN OTHERS.
+      CLEAR lv_ucomm1.
+  ENDCASE.
+ENDMODULE.
+*&---------------------------------------------------------------------*
+*&      Module  USER_COMMAND_0100  INPUT
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+MODULE user_command_0100 INPUT.
+
+  DATA(lv_ucomm) = sy-ucomm. " fucntion key action
+  CASE lv_ucomm.
+    WHEN 'EDIT'.
+      PERFORM switch_edit_mode.
+    WHEN 'POST'.
+      PERFORM post_data CHANGING lt_fcat1.
+    WHEN 'CANCEL' OR 'EXIT'.
+      LEAVE PROGRAM.
+    WHEN 'BACK'.
+      SET SCREEN '0'.
+      LEAVE SCREEN.
+    WHEN OTHERS.
+      LEAVE PROGRAM.
+  ENDCASE.
+ENDMODULE.
+*&---------------------------------------------------------------------*
+*& Form switch_edit_mode
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*& -->  p1        text
+*& <--  p2        text
+*&---------------------------------------------------------------------*
+FORM switch_edit_mode .
+
+  CALL METHOD lo_alv->get_selected_rows
+    IMPORTING
+      et_index_rows = lt_index_rows
+      et_row_no     = lt_row_no.
+
+  CLEAR :<t_dyntable2>.
+  LOOP AT <t_dyntable> ASSIGNING FIELD-SYMBOL(<fs_data>).
+    IF <fs_data> IS ASSIGNED.
+      READ TABLE lt_index_rows INTO DATA(ls_index_rows) WITH KEY index = sy-tabix.
+      IF sy-subrc = 0.
+        APPEND INITIAL LINE TO <t_dyntable2> ASSIGNING FIELD-SYMBOL(<fs_data1>).
+        IF <fs_data1> IS ASSIGNED.
+          <fs_data1> = <fs_data>.
+        ENDIF.
+      ENDIF.
+    ENDIF.
+  ENDLOOP.
+  CALL SCREEN 200.
+ENDFORM.
+*&---------------------------------------------------------------------*
+*& Module STATUS_0200 OUTPUT
+*&---------------------------------------------------------------------*
+*&
+*&---------------------------------------------------------------------*
+MODULE status_0200 OUTPUT.
+
+  DATA : ls_layout_dir          TYPE lvc_s_layo.
+
+  SET PF-STATUS 'ZSTATUS'.
+  IF lo_cust1 IS INITIAL.
+    CREATE OBJECT lo_cust1
+      EXPORTING
+        container_name              = 'CUST1'
+      EXCEPTIONS
+        cntl_error                  = 1
+        cntl_system_error           = 2
+        create_error                = 3
+        lifetime_error              = 4
+        lifetime_dynpro_dynpro_link = 5
+        OTHERS                      = 6.
+    IF sy-subrc <> 0.
+      MESSAGE ID sy-msgid TYPE sy-msgty NUMBER sy-msgno
+                 WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4.
+    ENDIF.
+  ENDIF.
+  IF lo_alv1 IS BOUND.
+    lo_alv1->refresh_table_display( ).
+  ELSE.
+    IF lo_cust1 IS NOT INITIAL.
+      CREATE OBJECT lo_alv1
+        EXPORTING
+          i_parent          = lo_cust1
+        EXCEPTIONS
+          error_cntl_create = 1
+          error_cntl_init   = 2
+          error_cntl_link   = 3
+          error_dp_create   = 4
+          OTHERS            = 5.
+      IF sy-subrc <> 0.
+        MESSAGE ID sy-msgid TYPE sy-msgty NUMBER sy-msgno
+                   WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4.
+      ENDIF.
+
+    ENDIF.
+  ENDIF.
+
+  CALL METHOD lo_alv1->register_edit_event
+    EXPORTING
+      i_event_id = cl_gui_alv_grid=>mc_evt_modified.
+
+  ls_layout_dir-edit = abap_true.
+
+  IF lo_alv1 IS NOT INITIAL.
+    CALL METHOD lo_alv1->set_table_for_first_display
+      EXPORTING
+        is_layout                     = ls_layout_dir
+        i_structure_name              = ' '
+        i_save                        = 'A'
+        is_variant                    = ls_variant
+      CHANGING
+        it_outtab                     = <t_dyntable2>
+        it_fieldcatalog               = lt_fcat1
+      EXCEPTIONS
+        invalid_parameter_combination = 1
+        program_error                 = 2
+        too_many_lines                = 3
+        OTHERS                        = 4.
+    IF sy-subrc <> 0.
+* Implement suitable error handling here
+      CLEAR :  lt_fcat2.
+    ENDIF.
+  ENDIF.
+ENDMODULE.
+*&---------------------------------------------------------------------*
+*&      Module  USER_COMMAND_0200  INPUT
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+MODULE user_command_0200 INPUT.
+
+
+  lv_ucomm = sy-ucomm. " fucntion key action
+  DATA : lv_flag TYPE char1.
+  CASE lv_ucomm.
+    WHEN 'SAVE'.
+      PERFORM save_data.
+    WHEN 'CANCEL' OR 'EXIT'.
+      LEAVE PROGRAM.
+    WHEN 'BACK'.
+      SET SCREEN '0'.
+      LEAVE SCREEN.
+    WHEN OTHERS.
+      CLEAR : lv_flag.
+  ENDCASE.
+
+ENDMODULE.
+*&---------------------------------------------------------------------*
+*& Form SAVE_DATA
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*& -->  p1        text
+*& <--  p2        text
+*&---------------------------------------------------------------------*
+FORM save_data .
+  DATA : lv_pos   TYPE  i,
+         lv_tabix TYPE i.
+
+  DATA : lv_tot_percent     TYPE acdoca-hsl,
+         lv_tot_percent_tmp TYPE char10.
+
+  FIELD-SYMBOLS : <status> TYPE any.
+
+  FIELD-SYMBOLS : <fs_value> TYPE any.
+  LOOP AT <t_dyntable> ASSIGNING FIELD-SYMBOL(<fs_dyntable2>).
+    ASSIGN COMPONENT 'PURCHASEORDER' OF STRUCTURE <fs_dyntable2> TO FIELD-SYMBOL(<fs_po>).
+    IF <fs_po> IS ASSIGNED.
+      LOOP AT <t_dyntable2> ASSIGNING FIELD-SYMBOL(<fs_dyntable_fin>).
+        ASSIGN COMPONENT 'PURCHASEORDER' OF STRUCTURE <fs_dyntable_fin> TO FIELD-SYMBOL(<fs_po_fin>).
+        IF <fs_po_fin> IS ASSIGNED AND <fs_po_fin> = <fs_po>.
+          <fs_dyntable2>  =   <fs_dyntable_fin>.
+          LOOP AT lt_fcat1 INTO DATA(ls_field) FROM 6.
+            ASSIGN COMPONENT sy-tabix OF STRUCTURE <fs_dyntable_fin> TO <fs_value>.
+            ASSIGN COMPONENT ls_field-fieldname OF STRUCTURE <fs_dyntable2> TO FIELD-SYMBOL(<fs_fieldname>).
+            <fs_fieldname> = <fs_value>.
+            SPLIT <fs_value> AT '%' INTO DATA(lv_value1) DATA(lv_value2).
+            lv_tot_percent = lv_value1 + lv_tot_percent.
+          ENDLOOP.
+          lv_tot_percent_tmp = lv_tot_percent.
+          CONDENSE : lv_tot_percent_tmp.
+          IF lv_tot_percent_tmp+0(3) <> 100.
+            ASSIGN COMPONENT 'STATUS' OF STRUCTURE <fs_dyntable2> TO <status>.
+            <status> = '@0A@'.      "Red light.
+            MESSAGE ID 'ZFINANCE'  TYPE 'I' NUMBER '191' DISPLAY LIKE 'E'.
+          ELSE.
+            ASSIGN COMPONENT 'STATUS' OF STRUCTURE <fs_dyntable2> TO <status>.
+            <status> = '@08@'."green light
+          ENDIF.
+        ENDIF.
+      ENDLOOP.
+    ENDIF.
+  ENDLOOP.
+  lo_alv->refresh_table_display( ).
+  SET SCREEN '100'.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*& Form post_data
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*& -->  p1        text
+*& <--  p2        text
+*&---------------------------------------------------------------------*
+FORM post_data CHANGING lt_fcat1 TYPE lvc_t_fcat.
+
+  CONSTANTS : lc_curr_00   TYPE  char2 VALUE '00',
+              lc_curr_11   TYPE  char2 VALUE '11',
+              lc_blart     TYPE char9 VALUE 'ZFI_BLART',
+              lc_gl_post   TYPE char11 VALUE 'Z_RACCT',
+              lc_profitctr TYPE char7 VALUE 'DEFAULT'.
+
+  DATA:lv_date       TYPE char8,
+       lv_lastdate   TYPE sy-datum,
+       ls_key        TYPE salv_s_layout_key,
+       lv_variant    TYPE slis_vari,
+       lv_date_post  TYPE sy-datum,
+       lv_gl         TYPE racct,
+       lv_prctr      TYPE prctr,
+       lv_amount     TYPE acdoca-hsl,
+       lv_hsl        TYPE acdoca-hsl,
+       lv_counter    TYPE posnr_acc,
+       lv_curr_count TYPE posnr_acc,
+       lo_alv        TYPE REF TO cl_salv_table,
+       lv_text_l     TYPE scrtext_l,
+       ls_dochead    TYPE bapiache09,
+       lt_curramnt   TYPE STANDARD TABLE OF bapiaccr09,
+       lt_accgl      TYPE STANDARD TABLE OF  bapiacgl09,
+       lt_copa_char  TYPE tt_copa_characteristics,
+       lt_extension  TYPE STANDARD TABLE OF bapiparex,
+       lt_return     TYPE STANDARD TABLE OF bapiret2,
+       ls_return     TYPE bapiret2,
+       lv_profit     TYPE string,
+       lv_costcenter TYPE kostl.
+
+  "Get doc type SS from tvarvc
+  SELECT SINGLE low FROM tvarvc INTO @DATA(lv_blart) WHERE name = @lc_blart.
+  IF sy-subrc <> 0.
+    CLEAR :  lv_blart.
+  ENDIF.
+
+  SELECT SINGLE low FROM tvarvc INTO @DATA(lv_credit_gl) WHERE name = @lc_gl_post.
+  IF sy-subrc <> 0.
+    CLEAR : lv_credit_gl.
+  ENDIF.
+
+* Get the last date of the month by passing the fisc year an period from sel screen
+  lv_date_post = |{ p_gjahr }{ p_poper }01|.
+
+  CALL FUNCTION 'RP_LAST_DAY_OF_MONTHS'
+    EXPORTING
+      day_in            = lv_date_post
+    IMPORTING
+      last_day_of_month = lv_lastdate
+    EXCEPTIONS
+      day_in_no_date    = 1
+      OTHERS            = 2.
+  IF sy-subrc <> 0.
+* Implement suitable error handling here
+    CLEAR : lv_lastdate.
+  ENDIF.
+
+  "check if there is any record with status Red if yes it should not allow for posting
+  LOOP AT <t_dyntable> ASSIGNING FIELD-SYMBOL(<dyntable>).
+    ASSIGN COMPONENT 'STATUS' OF STRUCTURE <dyntable> TO FIELD-SYMBOL(<status>).
+    IF <status> = '@0A@'.
+      DATA(lv_block_post) = abap_true.
+      MESSAGE ID 'ZFINANCE' TYPE 'I' NUMBER 192 DISPLAY LIKE 'E'.
+      EXIT.
+    ENDIF.
+  ENDLOOP.
+
+  IF lv_block_post = abap_false.
+    SELECT * FROM zfin_t_prc_costc INTO TABLE @DATA(lt_prct_cost) .
+    IF sy-subrc <> 0.
+      CLEAR : lt_prct_cost.
+    ENDIF.
+
+    "Prepare internal table with uniqe comp code
+    DATA(lt_data_bukrs) = lt_data1.
+    SORT lt_data_bukrs BY bukrs.
+    DELETE ADJACENT DUPLICATES FROM lt_data_bukrs COMPARING bukrs.
+    LOOP AT lt_data_bukrs INTO DATA(ls_data_bukrs).
+
+      go_obj->check_post_freight_doc(
+        EXPORTING
+          iv_bukrs            = ls_data_bukrs-bukrs               " Company Code
+          iv_gjahr            = p_gjahr          " Fiscal Year
+          iv_poper            = p_poper               " Posting period
+          iv_ebeln            = ls_data_bukrs-ebeln   " Boolean Variable (X = True, - = False, Space = Unknown)
+        RECEIVING
+          ev_post_freight_doc = DATA(lv_post_doc)
+      ).
+      IF lv_post_doc EQ abap_false.
+
+        APPEND INITIAL LINE TO gt_output ASSIGNING FIELD-SYMBOL(<fs_output>).
+        <fs_output>-rbukrs = ls_data_bukrs-bukrs.
+        MESSAGE ID 'ZFINANCE' TYPE 'E' NUMBER 128 WITH p_poper ls_data_bukrs-bukrs INTO DATA(lv_message).
+        <fs_output>-message = lv_message.
+        CONTINUE.
+      ENDIF.
+
+      "Populate header
+      ls_dochead-username   = sy-uname.
+      ls_dochead-comp_code  = ls_data_bukrs-bukrs.
+      ls_dochead-doc_date   = lv_lastdate.
+      ls_dochead-pstng_date = lv_lastdate.
+      ls_dochead-fisc_year  = p_gjahr.
+      ls_dochead-fis_period = p_poper.
+      ls_dochead-doc_type   = lv_blart. "SS
+
+      LOOP AT lt_data1 INTO ls_data1 WHERE bukrs = ls_data_bukrs-bukrs.
+        lv_counter  = lv_counter + 1.
+        lv_curr_count = lv_curr_count + 1.
+        READ TABLE lt_po_amount INTO DATA(ls_po_amount) WITH KEY ebeln = ls_data1-ebeln.
+        IF sy-subrc = 0.
+          READ TABLE lt_data INTO ls_data WITH KEY ebeln = ls_data1-ebeln.
+          IF sy-subrc = 0.
+            IF ls_po_amount-hsl LT 0.
+              lt_accgl = VALUE #( BASE lt_accgl ( itemno_acc = lv_counter
+                                                  gl_account = |{ lv_credit_gl ALPHA = IN }|
+                                                  fisc_year  = p_gjahr
+                                                  fis_period = p_poper
+                                                  profit_ctr = lc_profitctr "DEFAULT
+                                                  doc_type   = lv_blart
+                                                  po_number  = ls_data1-ebeln
+                                                  item_text  = |{ ls_data1-bukrs }{ p_poper }{ p_gjahr }-{ ls_data1-ebeln }|
+                                                  value_date = lv_lastdate ) ).
+              lv_hsl =  ls_po_amount-hsl * ( -1 ).
+              "Document Currency
+              lt_curramnt = VALUE #( BASE lt_curramnt ( itemno_acc = lv_curr_count
+                                                        curr_type = lc_curr_11 "11
+                                                        currency_iso = ls_po_amount-rhcur
+                                                        amt_doccur = lv_hsl ) ).
+
+              lt_curramnt = VALUE #( BASE lt_curramnt ( itemno_acc = lv_curr_count
+                                                        curr_type = lc_curr_00  "00
+                                                        currency_iso = ls_po_amount-rhcur
+                                                        amt_doccur = lv_hsl ) ).
+              """'credit
+              LOOP AT lt_data INTO DATA(ls_data_final) WHERE ebeln = ls_data1-ebeln.
+                lv_counter    = lv_counter + 1.
+                lv_curr_count = lv_curr_count + 1.
+
+                lv_profit = ls_data_final-prctr+0(2).
+                IF  lv_profit = 'DC'.
+                  READ TABLE lt_prct_cost ASSIGNING FIELD-SYMBOL(<fs_prctr_cost>) WITH KEY prctr = ls_data_final-prctr.
+                  IF sy-subrc EQ 0.
+                    lv_costcenter = <fs_prctr_cost>-kostl.
+                  ENDIF.
+                  CLEAR: lv_profit.
+                ENDIF.
+
+
+                lt_accgl = VALUE #( BASE lt_accgl ( itemno_acc = lv_counter
+                                                    gl_account = |{ ls_data_final-racct ALPHA = IN }|
+                                                    fisc_year  = p_gjahr
+                                                    fis_period = p_poper
+                                                    profit_ctr = ls_data_final-prctr
+                                                    costcenter = lv_costcenter
+                                                     po_number = ls_data1-ebeln
+                                                    doc_type   =  lv_blart
+                                                    item_text  = |{ ls_data1-bukrs }{ p_poper }{ p_gjahr }-{ ls_data1-ebeln }|
+                                                    value_date = lv_lastdate ) )."last day of month
+
+                CLEAR lv_costcenter.
+                CONDENSE ls_data_final-percnt.
+
+
+                lv_amount = ( ls_po_amount-hsl * ls_data_final-percnt ) / 100 .
+                "Document Currency
+                lt_curramnt = VALUE #( BASE lt_curramnt ( itemno_acc   = lv_curr_count
+                                                          curr_type    = lc_curr_11 "11
+                                                          currency_iso = ls_po_amount-rhcur
+                                                          amt_doccur   =   lv_amount ) ).
+
+                lt_curramnt = VALUE #( BASE lt_curramnt ( itemno_acc  = lv_curr_count
+                                                         curr_type    = lc_curr_00 "00
+                                                         currency_iso = ls_po_amount-rhcur
+                                                         amt_doccur   =   lv_amount ) ) .
+
+              ENDLOOP.
+
+            ELSEIF ls_po_amount-hsl GT 0.
+
+              lt_accgl = VALUE #( BASE lt_accgl ( itemno_acc = lv_counter
+                                                  gl_account = |{ lv_credit_gl ALPHA = IN }|
+                                                  fisc_year  = p_gjahr
+                                                  fis_period = p_poper
+                                                  profit_ctr = lc_profitctr
+                                                  doc_type   = lv_blart
+                                                  po_number  = ls_data1-ebeln
+                                                  item_text  = |{ ls_data1-bukrs }{ p_poper }{ p_gjahr }-{ ls_data1-ebeln }|
+                                                  value_date = lv_lastdate ) ).
+
+              lv_hsl = ls_po_amount-hsl * ( -1 ).
+              "Document Currency
+              lt_curramnt = VALUE #( BASE lt_curramnt ( itemno_acc = lv_curr_count
+                                                        curr_type = lc_curr_11 "11
+                                                        currency_iso = ls_po_amount-rhcur
+                                                        amt_doccur = lv_hsl ) ).
+
+              lt_curramnt = VALUE #( BASE lt_curramnt ( itemno_acc = lv_curr_count
+                                                        curr_type = lc_curr_00 "00
+                                                        currency_iso = ls_po_amount-rhcur
+                                                        amt_doccur = lv_hsl  ) ) .
+
+              "credit
+              LOOP AT lt_data INTO ls_data_final WHERE ebeln = ls_data1-ebeln.
+                lv_counter = lv_counter + 1.
+                lv_curr_count = lv_curr_count + 1.
+
+                lv_profit = ls_data_final-prctr+0(2).
+
+                IF  lv_profit = 'DC'.
+                  READ TABLE lt_prct_cost ASSIGNING <fs_prctr_cost> WITH KEY prctr = ls_data_final-prctr.
+                  IF sy-subrc EQ 0.
+                    lv_costcenter = <fs_prctr_cost>-kostl.
+                  ENDIF.
+                  CLEAR: lv_profit.
+                ENDIF.
+
+                lt_accgl = VALUE #( BASE lt_accgl ( itemno_acc = lv_counter
+                                       gl_account = |{ ls_data_final-racct ALPHA = IN }|
+                                       fisc_year  = p_gjahr
+                                       fis_period = p_poper
+                                       profit_ctr = ls_data_final-prctr
+                                       costcenter = lv_costcenter
+                                       doc_type   = lv_blart
+                                       item_text  = |{ ls_data1-bukrs }{ p_poper }{ p_gjahr }-{ ls_data1-ebeln }|
+                                       po_number  = ls_data1-ebeln
+                                       value_date = lv_lastdate ) ).
+                CLEAR lv_costcenter.
+
+                CONDENSE ls_data_final-percnt.
+
+
+
+                lv_amount = ( ls_po_amount-hsl * ls_data_final-percnt ) / 100 .
+                "Document Currency
+                lt_curramnt = VALUE #( BASE lt_curramnt ( itemno_acc = lv_curr_count
+                                                          curr_type = lc_curr_11 "11
+                                                          currency_iso = ls_po_amount-rhcur
+                                                          amt_doccur = lv_amount  ) ).
+
+                lt_curramnt = VALUE #( BASE lt_curramnt ( itemno_acc = lv_curr_count
+                                                         curr_type = lc_curr_00 "00
+                                                         currency_iso = ls_po_amount-rhcur
+                                                         amt_doccur = lv_amount  ) ).
+              ENDLOOP.
+            ENDIF.
+          ENDIF.
+        ENDIF.
+      ENDLOOP.
+      "Check if document can be posted and there is no error
+
+      CALL FUNCTION 'BAPI_ACC_DOCUMENT_CHECK'
+        EXPORTING
+          documentheader = ls_dochead
+        TABLES
+          accountgl      = lt_accgl
+          currencyamount = lt_curramnt
+          extension2     = lt_extension
+          return         = lt_return.
+
+      READ TABLE lt_return ASSIGNING FIELD-SYMBOL(<fs_return>) WITH KEY type ='E' .
+      IF sy-subrc <> 0.
+        CALL FUNCTION 'BAPI_ACC_DOCUMENT_POST'
+          EXPORTING
+            documentheader = ls_dochead
+          TABLES
+            accountgl      = lt_accgl
+            currencyamount = lt_curramnt
+            extension2     = lt_extension
+            return         = lt_return.
+        IF NOT line_exists( lt_return[ type = 'E' ] ).
+*Commit if no errors
+          CALL FUNCTION 'BAPI_TRANSACTION_COMMIT'
+            EXPORTING
+              wait = abap_true.
+
+          CLEAR lv_message.
+          lv_message = lt_return[ 1 ]-message.
+
+          APPEND INITIAL LINE TO gt_output ASSIGNING <fs_output>.
+          <fs_output>-rbukrs = ls_data_bukrs-bukrs.
+          <fs_output>-message = lv_message.
+
+        ENDIF.
+      ELSE.
+        READ TABLE lt_return ASSIGNING <fs_return> INDEX 2.
+        IF sy-subrc = 0.
+          APPEND INITIAL LINE TO gt_output ASSIGNING <fs_output>.
+          <fs_output>-rbukrs = ls_data_bukrs-bukrs.
+          <fs_output>-message = <fs_return>-message.
+        ENDIF.
+      ENDIF.
+      CLEAR : ls_dochead, lt_accgl, lt_curramnt, lv_curr_count,lv_counter,lv_message.
+    ENDLOOP.
+
+    IF gt_output IS NOT INITIAL.
+
+*** Display Output
+      TRY.
+          CALL METHOD cl_salv_table=>factory
+            EXPORTING
+              list_display = if_salv_c_bool_sap=>false
+            IMPORTING
+              r_salv_table = lo_alv
+            CHANGING
+              t_table      = gt_output.
+
+        CATCH cx_salv_msg INTO DATA(ls_salv_msg).
+          MESSAGE ID sy-msgid TYPE 'E' NUMBER sy-msgno WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4.
+      ENDTRY.
+
+      IF lo_alv IS BOUND.
+*     Set ALV details and display output
+        DATA(lo_layout) = lo_alv->get_layout( ).
+        DATA(lr_columns) = lo_alv->get_columns( ).
+        ls_key-report = sy-repid.
+        lo_layout->set_key( ls_key ).
+        lo_layout->set_save_restriction( if_salv_c_layout=>restrict_none ).
+        lv_variant = 'DEFAULT'.
+        lo_layout->set_initial_layout( lv_variant ).
+      ENDIF.
+
+      lv_text_l = 'Description'(002).
+      lr_columns->get_column( columnname = 'MESSAGE' )->set_short_text( value = '' ).
+      lr_columns->get_column( columnname = 'MESSAGE' )->set_medium_text( value = '' ).
+      lr_columns->get_column( columnname = 'MESSAGE' )->set_long_text( value = lv_text_l ).
+      lr_columns->get_column( columnname = 'MESSAGE' )->set_output_length( value = 50 ).
+      lo_alv->display( ).
+    ENDIF.
+
+  ENDIF.
+ENDFORM.
+*&---------------------------------------------------------------------*
+*& Form CALCULATIONS
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*& -->  p1        text
+*& <--  p2        text
+*&---------------------------------------------------------------------*
+FORM calculations .
+
+  DATA : lv_tot_percent TYPE char10,
+*         lv_max_percnt  TYPE char10,
+
+         lv_prctr       TYPE prctr,
+         lv_racct       TYPE racct,
+         lv_tabix       TYPE i.
+
+  CONSTANTS : lc_gl         TYPE char7 VALUE 'ZFIN_GL',
+              lc_blart      TYPE char9 VALUE 'ZFI_BLART',
+              lc_rldnr      TYPE char7 VALUE 'Z_RLDNR',
+              lc_redlight   TYPE char4 VALUE '@0A@',
+              lc_greenlight TYPE char4 VALUE '@08@'.
+
+  TYPES: BEGIN OF ty_low,
+           low TYPE char10,
+         END OF ty_low.
+
+  DATA : lt_low TYPE TABLE OF ty_low.
+  DATA : lt_rng TYPE RANGE OF char10.
+
+  DATA : gt_table_data_dir  TYPE REF TO data,
+         gt_table_data_dir1 TYPE REF TO data,
+         gs_line_data_dir   TYPE REF TO data.
+
+  DATA : lv_tot_percent_tmp TYPE char7,
+         lv_max_prcnt(8)    TYPE p DECIMALS 4,
+         lv_temp_prcnt(8)   TYPE p DECIMALS 4,
+         lv_diff_prcnt(8)   TYPE p DECIMALS 4.
+
+  CONSTANTS: lc_100(8) TYPE p DECIMALS 4 VALUE '100.0000'.
+
+  SELECT SINGLE low FROM tvarvc INTO @DATA(lv_rldnr) WHERE name = @lc_rldnr.
+  IF sy-subrc <> 0.
+    CLEAR : lv_rldnr.
+  ENDIF.
+
+  SELECT SINGLE low FROM tvarvc INTO @DATA(lv_blart) WHERE name = @lc_blart.
+  IF sy-subrc <> 0.
+    CLEAR : lv_blart.
+  ENDIF.
+
+  SELECT low FROM tvarvc INTO TABLE @lt_low WHERE name = @lc_gl.
+  IF sy-subrc = 0.
+    lt_rng = VALUE #( FOR ls_rng IN lt_low ( sign = 'I' option = 'EQ' low = ls_rng-low ) ).
+  ENDIF.
+
+  IF lt_po_amount IS NOT INITIAL.
+    SELECT  rbukrs,
+            racct,
+            prctr,
+            blart,
+            ebeln,
+            SUM( hsl ) AS hsl
+            FROM acdoca
+            WHERE ( rldnr = ' '
+            AND  rbukrs   = ' '
+            AND  gjahr    = ' '
+            AND  belnr    =  ' '
+            AND  docln    = ' ' )
+            OR (  rldnr = @lv_rldnr
+            AND blart   = @lv_blart
+            AND racct   IN @lt_rng
+            AND ebeln IN ( SELECT ebeln FROM @lt_po_amount AS po ) )
+            GROUP BY rbukrs, racct, prctr, blart , ebeln
+            INTO TABLE @lt_gl_profit.
+    IF sy-subrc = 0.
+      SELECT ebeln, SUM( hsl ) AS hsl FROM @lt_gl_profit AS gl_prt
+      GROUP BY ebeln
+      INTO TABLE @DATA(lt_tmp).
+      IF sy-subrc = 0.
+        DELETE lt_tmp WHERE hsl EQ 0.
+        "prepare internal table with percentages
+        lt_data = VALUE #( FOR ls_gl_profit IN lt_gl_profit
+        LET ls_tmp = VALUE #( lt_tmp[  ebeln = ls_gl_profit-ebeln ] OPTIONAL ) IN
+                                 ( bukrs = ls_gl_profit-bukrs
+                                   racct = ls_gl_profit-racct
+                                   prctr = ls_gl_profit-prctr
+                                   ebeln = ls_gl_profit-ebeln
+                                   amt   = ls_gl_profit-hsl
+                                   amt_po = ls_tmp-hsl
+                                   percnt = ( ls_gl_profit-hsl / ls_tmp-hsl  ) * 100 ) ).
+        lt_data1 = lt_data.
+        SORT lt_data1 BY ebeln.
+        DELETE ADJACENT DUPLICATES FROM lt_data1 COMPARING ebeln.
+      ENDIF.
+    ENDIF.
+  ENDIF.
+
+  "Delete duplicate values of profit center and GL to prepare Fieldcat dynmically
+  DATA(lt_gl_pr_temp) = lt_gl_profit .
+  SORT lt_gl_pr_temp BY racct prctr.
+  DELETE ADJACENT DUPLICATES FROM lt_gl_pr_temp COMPARING  racct prctr.
+
+  "Prepare field cat dynmically
+  go_obj->build_fact_dyn( EXPORTING it_gl_profit = lt_gl_pr_temp
+                          IMPORTING et_fcat1     = lt_fcat1 ).
+
+  "Prepare dynamic internal table structure
+  CLEAR : lt_tot_comp.
+  ls_fcat1-fieldname = 'STATUS'.
+  CONDENSE :ls_fcat1-fieldname.
+*   Element Description
+  lo_element ?= cl_abap_elemdescr=>describe_by_name( 'NAME1' ).
+  ls_comp-name = ls_fcat1-fieldname.
+*   Field type
+  ls_comp-type = cl_abap_elemdescr=>get_c( p_length = lo_element->length ).
+  APPEND ls_comp TO lt_tot_comp.
+  CLEAR: ls_comp.
+
+  ls_fcat1-fieldname = 'BUKRS'.
+  CONDENSE :ls_fcat1-fieldname.
+*   Element Description
+  lo_element ?= cl_abap_elemdescr=>describe_by_name( 'NAME1' ).
+  ls_comp-name = ls_fcat1-fieldname.
+*   Field type
+  ls_comp-type = cl_abap_elemdescr=>get_c( p_length = lo_element->length ).
+  APPEND ls_comp TO lt_tot_comp.
+  CLEAR: ls_comp.
+
+  ls_fcat1-fieldname = 'PURCHASEORDER'.
+  CONDENSE :ls_fcat1-fieldname.
+*   Element Description
+  lo_element ?= cl_abap_elemdescr=>describe_by_name( 'NAME1' ).
+  ls_comp-name = ls_fcat1-fieldname.
+*   Field type
+  ls_comp-type = cl_abap_elemdescr=>get_c( p_length = lo_element->length ).
+  APPEND ls_comp TO lt_tot_comp.
+  CLEAR: ls_comp.
+
+  ls_fcat1-fieldname = 'AMOUNT'.
+  CONDENSE :ls_fcat1-fieldname.
+*   Element Description
+  lo_element ?= cl_abap_elemdescr=>describe_by_name( 'NAME1' ).
+  ls_comp-name = ls_fcat1-fieldname.
+*   Field type
+  ls_comp-type = cl_abap_elemdescr=>get_c( p_length = lo_element->length ).
+  APPEND ls_comp TO lt_tot_comp.
+  CLEAR: ls_comp.
+
+  ls_fcat1-fieldname = 'RHCUR'.
+  CONDENSE :ls_fcat1-fieldname.
+* Element Description
+  lo_element ?= cl_abap_elemdescr=>describe_by_name( 'NAME1' ).
+  ls_comp-name = ls_fcat1-fieldname.
+* Field type
+  ls_comp-type = cl_abap_elemdescr=>get_c( p_length = lo_element->length ).
+  APPEND ls_comp TO lt_tot_comp.
+  CLEAR: ls_comp.
+
+
+  LOOP AT lt_gl_pr_temp ASSIGNING FIELD-SYMBOL(<fs_gl_profit>).
+    ls_fcat1-fieldname = | { <fs_gl_profit>-prctr }{ <fs_gl_profit>-racct }|.
+    CONDENSE :ls_fcat1-fieldname.
+*   Element Description
+    lo_element ?= cl_abap_elemdescr=>describe_by_name( 'NAME1' ).
+    ls_comp-name = ls_fcat1-fieldname.
+*   Field type
+    ls_comp-type = cl_abap_elemdescr=>get_c( p_length = lo_element->length ).
+    APPEND ls_comp TO lt_tot_comp.
+    CLEAR: ls_comp.
+  ENDLOOP.
+
+
+  CALL METHOD cl_abap_structdescr=>create
+    EXPORTING
+      p_components = lt_tot_comp
+      p_strict     = cl_abap_structdescr=>false
+    RECEIVING
+      p_result     = DATA(gs_struct_descr_dir).
+
+**Create table TYPE based ON the structure
+
+  CALL METHOD cl_abap_tabledescr=>create
+    EXPORTING
+      p_line_type  = gs_struct_descr_dir
+      p_table_kind = cl_abap_tabledescr=>tablekind_std
+    RECEIVING
+      p_result     = DATA(gt_tab_descr_dir).
+
+
+  CALL METHOD cl_abap_tabledescr=>create
+    EXPORTING
+      p_line_type  = gs_struct_descr_dir
+      p_table_kind = cl_abap_tabledescr=>tablekind_std
+    RECEIVING
+      p_result     = DATA(gt_tab_descr_dir1).
+
+  CREATE DATA gt_table_data_dir TYPE HANDLE gt_tab_descr_dir.
+  ASSIGN gt_table_data_dir->* TO <t_dyntable>.
+
+  CREATE DATA gt_table_data_dir1 TYPE HANDLE gt_tab_descr_dir.
+  ASSIGN gt_table_data_dir1->* TO <t_dyntable2>.
+
+  CREATE DATA gs_line_data_dir TYPE HANDLE gs_struct_descr_dir.
+  ASSIGN gs_line_data_dir->* TO <fs_dyntable>.
+
+  "pass data to dynamic internal table
+  LOOP AT lt_po_amount ASSIGNING FIELD-SYMBOL(<fs_po_amount>).
+
+    IF <fs_po_amount>-doc_posted IS NOT INITIAL.
+      CONTINUE.
+    ENDIF.
+
+*  LOOP AT lt_data1 INTO DATA(ls_data_temp).
+    ASSIGN COMPONENT 'PURCHASEORDER'  OF STRUCTURE <fs_dyntable> TO <percent>.
+    <percent> = <fs_po_amount>-ebeln.
+    ASSIGN COMPONENT 'BUKRS' OF STRUCTURE <fs_dyntable> TO <percent>.
+    <percent> = <fs_po_amount>-bukrs.
+
+    ASSIGN COMPONENT 'AMOUNT'  OF STRUCTURE <fs_dyntable> TO <percent>.
+    <percent> = <fs_po_amount>-hsl.
+
+*    READ TABLE lt_po_amount INTO DATA(ls_po) WITH KEY ebeln = ls_data_temp-ebeln.
+*    IF sy-subrc = 0.
+*      <percent> = ls_po-hsl.
+*    ENDIF.
+
+    ASSIGN COMPONENT 'RHCUR'  OF STRUCTURE <fs_dyntable> TO <percent>.
+    <percent> = <fs_po_amount>-rhcur.
+    CLEAR :lv_max_prcnt,lv_prctr,lv_racct.
+
+    LOOP AT lt_fcat1 INTO DATA(ls_fcat1) FROM 6.
+      ASSIGN COMPONENT sy-tabix OF STRUCTURE <fs_dyntable> TO <percent>.
+      READ TABLE lt_data INTO ls_data WITH KEY ebeln = <fs_po_amount>-ebeln prctr = ls_fcat1-fieldname+0(10) racct = ls_fcat1-fieldname+10(10).
+      IF sy-subrc = 0.
+
+        CONDENSE ls_data-percnt.
+        DATA(lv_round) = round( val = ls_data-percnt dec = 4 ).
+        <percent> = |{ lv_round }{ '%' }|.
+        lv_tot_percent = ls_data-percnt + lv_tot_percent.
+
+        CONDENSE ls_data-percnt.
+
+        lv_temp_prcnt = CONV #( ls_data-percnt ).
+
+        IF lv_temp_prcnt GT lv_max_prcnt.
+          lv_max_prcnt = lv_temp_prcnt.
+          lv_prctr  = ls_fcat1-fieldname+0(10).
+          lv_racct  = ls_fcat1-fieldname+10(10).
+        ENDIF.
+      ENDIF.
+    ENDLOOP.
+
+    CONDENSE lv_tot_percent.
+    "if tot perce tage value is not equal to 100 % the status field should be displayed with red traffic light
+    lv_tot_percent_tmp = lv_tot_percent.
+    IF lv_tot_percent_tmp+0(3) <> 100.
+
+      lv_diff_prcnt = lc_100 - lv_tot_percent_tmp.
+      DATA(lv_component) =  |{ lv_prctr }{ lv_racct }|.
+
+      IF lv_diff_prcnt > 0.
+        lv_max_prcnt = lv_max_prcnt + lv_diff_prcnt.
+      ELSE.
+        lv_max_prcnt = lv_max_prcnt - lv_diff_prcnt.
+      ENDIF.
+
+      IF abs( lv_diff_prcnt ) <= '0.001'.
+
+        ASSIGN COMPONENT lv_component OF STRUCTURE <fs_dyntable> TO FIELD-SYMBOL(<diff>).
+        IF <diff> IS ASSIGNED.
+          <diff> = |{ lv_max_prcnt }{ '%' }|.
+          UNASSIGN <diff>.
+        ENDIF.
+        ASSIGN COMPONENT 'STATUS' OF STRUCTURE <fs_dyntable> TO <percent>.
+        <percent> = lc_greenlight."green light
+
+      ELSE.
+        ASSIGN COMPONENT 'STATUS' OF STRUCTURE <fs_dyntable> TO <percent>.
+        <percent> = lc_redlight.     "Red light.
+      ENDIF.
+      CLEAR lv_diff_prcnt.
+    ELSE.
+
+      ASSIGN COMPONENT 'STATUS' OF STRUCTURE <fs_dyntable> TO <percent>.
+      <percent> = lc_greenlight."green light
+    ENDIF.
+    APPEND <fs_dyntable> TO <t_dyntable>.
+    CLEAR :  <fs_dyntable>, lv_tot_percent,lv_tot_percent_tmp,lv_round,lv_max_prcnt,lv_prctr,lv_racct.
+  ENDLOOP.
+
+  IF <t_dyntable> IS NOT INITIAL.
+    "display ALV with percentages
+    CALL SCREEN '100'.
+  ENDIF.
+
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*& Form EDIT_POdATA
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*& -->  p1        text
+*& <--  p2        text
+*&---------------------------------------------------------------------*
+FORM edit_podata.
+  "Get the selected rows
+  CALL METHOD lo_alv2->get_selected_rows
+    IMPORTING
+      et_index_rows = lt_index_rows
+      et_row_no     = lt_row_no.
+
+  DATA : ls_po_amount1 TYPE ty_po_amount1.
+
+  CLEAR : lt_po_amount1.
+  "prepare table lt_po_amount1 with edited values to first screen
+  LOOP AT lt_po_amount ASSIGNING FIELD-SYMBOL(<fs_po_amount>).
+    IF <fs_po_amount> IS ASSIGNED.
+      READ TABLE lt_index_rows INTO DATA(ls_index_rows) WITH KEY index = sy-tabix.
+      IF sy-subrc = 0.
+        ls_po_amount1-index = <fs_po_amount>-index.
+        ls_po_amount1-bukrs = <fs_po_amount>-bukrs.
+        ls_po_amount1-ebeln = <fs_po_amount>-ebeln.
+        ls_po_amount1-hsl   = <fs_po_amount>-hsl.
+        ls_po_amount1-rhcur = <fs_po_amount>-rhcur.
+        APPEND ls_po_amount1 TO lt_po_amount1.
+        CLEAR ls_po_amount1.
+      ENDIF.
+    ENDIF.
+  ENDLOOP.
+
+  "Call the alv with lines to be edited
+  CALL SCREEN 400.
+ENDFORM.
+*&---------------------------------------------------------------------*
+*& Module STATUS_0400 OUTPUT
+*&---------------------------------------------------------------------*
+*&
+*&---------------------------------------------------------------------*
+MODULE status_0400 OUTPUT.
+  SET PF-STATUS 'ZPO_EDIT'.
+
+  DATA : ls_layout_dir1          TYPE lvc_s_layo.
+
+  IF lo_cust3 IS INITIAL.
+    CREATE OBJECT lo_cust3
+      EXPORTING
+        container_name              = 'CUST3'
+      EXCEPTIONS
+        cntl_error                  = 1
+        cntl_system_error           = 2
+        create_error                = 3
+        lifetime_error              = 4
+        lifetime_dynpro_dynpro_link = 5
+        OTHERS                      = 6.
+    IF sy-subrc <> 0.
+      MESSAGE ID sy-msgid TYPE sy-msgty NUMBER sy-msgno
+                 WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4.
+    ENDIF.
+  ENDIF.
+  IF lo_alv3 IS BOUND.
+    lo_alv3->refresh_table_display( ).
+  ELSE.
+    IF lo_cust3 IS NOT INITIAL.
+      CREATE OBJECT lo_alv3
+        EXPORTING
+          i_parent          = lo_cust3
+        EXCEPTIONS
+          error_cntl_create = 1
+          error_cntl_init   = 2
+          error_cntl_link   = 3
+          error_dp_create   = 4
+          OTHERS            = 5.
+      IF sy-subrc <> 0.
+        MESSAGE ID sy-msgid TYPE sy-msgty NUMBER sy-msgno
+                   WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4.
+      ENDIF.
+    ENDIF.
+  ENDIF.
+
+
+  CALL METHOD lo_alv3->register_edit_event
+    EXPORTING
+      i_event_id = cl_gui_alv_grid=>mc_evt_modified.
+
+  "make the whole grid editable
+  ls_layout_dir1-edit = abap_true.
+
+  REFRESH lt_fcat3.
+
+  CLEAR : lv_pos,ls_fcat3.
+  ls_fcat3-col_pos = lv_pos + 1.
+  lv_pos = lv_pos + 1.
+  ls_fcat3-fieldname = 'INDEX'.
+  ls_fcat3-reptext = 'Index'.
+  APPEND ls_fcat3 TO lt_fcat3.
+
+
+  ls_fcat3-col_pos = lv_pos + 1.
+  lv_pos = lv_pos + 1.
+  ls_fcat3-fieldname = 'BUKRS'.
+  ls_fcat3-reptext = 'Company Code'.
+  APPEND ls_fcat3 TO lt_fcat3.
+
+  ls_fcat3-col_pos = lv_pos + 1.
+  lv_pos = lv_pos + 1.
+  ls_fcat3-fieldname = 'EBELN'.
+  ls_fcat3-reptext = 'Purchasingdocumnet'.
+  APPEND ls_fcat3 TO lt_fcat3.
+
+  ls_fcat3-col_pos = lv_pos + 1.
+  lv_pos = lv_pos + 1.
+  ls_fcat3-fieldname = 'HSL'.
+  ls_fcat3-reptext = 'Amount'.
+  "ls_fcat3-do_sum = abap_true.
+  APPEND ls_fcat3 TO lt_fcat3.
+
+  ls_fcat3-col_pos = lv_pos + 1.
+  lv_pos = lv_pos + 1.
+  ls_fcat3-fieldname = 'RHCUR'.
+  ls_fcat3-reptext = 'Currency'.
+  APPEND ls_fcat3 TO lt_fcat3.
+
+  IF lo_alv3 IS NOT INITIAL.
+    IF lt_po_amount1 IS NOT INITIAL.
+      CALL METHOD lo_alv3->set_table_for_first_display
+        EXPORTING
+          is_layout                     = ls_layout_dir1
+          i_save                        = 'A'
+        CHANGING
+          it_outtab                     = lt_po_amount1
+          it_fieldcatalog               = lt_fcat3
+        EXCEPTIONS
+          invalid_parameter_combination = 1
+          program_error                 = 2
+          too_many_lines                = 3
+          OTHERS                        = 4.
+      IF sy-subrc <> 0.
+* Implement suitable error handling here
+        CLEAR : lt_fcat3.
+      ENDIF.
+    ELSE.
+      MESSAGE 'No data exist'(002) TYPE 'E'.
+    ENDIF.
+  ENDIF.
+ENDMODULE.
+*&---------------------------------------------------------------------*
+*&      Module  USER_COMMAND_0400  INPUT
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+MODULE user_command_0400 INPUT.
+  lv_ucomm = sy-ucomm. " fucntion key action
+  CASE lv_ucomm.
+    WHEN 'SAVE'.
+      PERFORM update_po.
+    WHEN 'CANCEL' OR 'EXIT'.
+      LEAVE PROGRAM.
+    WHEN 'BACK'.
+      SET SCREEN '0'.
+      LEAVE SCREEN.
+    WHEN OTHERS.
+      LEAVE PROGRAM.
+  ENDCASE.
+ENDMODULE.
+*&---------------------------------------------------------------------*
+*& Form UPDATE_PO
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*& -->  p1        text
+*& <--  p2        text
+*&---------------------------------------------------------------------*
+FORM update_po .
+
+  "update the edited PO amount value of second creen with the first screen
+  LOOP AT lt_po_amount ASSIGNING FIELD-SYMBOL(<fs_po_amount>).
+    READ TABLE lt_po_amount1 INTO DATA(ls_po_amount1) WITH KEY ebeln = <fs_po_amount>-ebeln.
+    IF sy-subrc = 0.
+      MOVE-CORRESPONDING ls_po_amount1 TO <fs_po_amount>.
+    ENDIF.
+  ENDLOOP.
+
+  lo_alv2->refresh_table_display( ).
+  SET SCREEN '300'.
+ENDFORM.
