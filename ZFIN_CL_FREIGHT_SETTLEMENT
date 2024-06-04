@@ -1,0 +1,752 @@
+class ZFIN_CL_FREIGHT_SETTLEMENT definition
+  public
+  final
+  create public .
+
+public section.
+
+  types:
+    BEGIN OF ty_po_amount,
+        index TYPE i,
+        bukrs TYPE acdoca-rbukrs,
+        ebeln TYPE ebeln,
+        hsl   TYPE acdoca-hsl,
+        rhcur TYPE waers,
+        doc_posted(50) type c,
+      END OF ty_po_amount .
+  types:
+    BEGIN OF ty_gl_profit,
+        bukrs TYPE bukrs,
+       " rhcur TYPE fins_currh,
+        racct TYPE racct,
+        prctr TYPE prctr,
+        blart TYPE blart,
+        ebeln TYPE ebeln,
+        hsl   TYPE acdoca-hsl,
+      END OF ty_gl_profit .
+  types:
+    BEGIN OF ty_data,
+        ebeln  TYPE ebeln,
+        bukrs  TYPE bukrs,
+        racct  TYPE racct,
+        amt    TYPE fins_vhcur12,
+        amt_po TYPE fins_vhcur12,
+        rhcur  TYPE waers,
+        prctr  TYPE prctr,
+        percnt TYPE char10,
+      END OF ty_data .
+  types:
+    tty_po_amount TYPE STANDARD TABLE OF ty_po_amount .
+  types:
+    tty_gl_profit TYPE STANDARD TABLE OF ty_gl_profit .
+  types:
+    tty_data TYPE STANDARD TABLE OF ty_data .
+  types:
+    lty_bukrs TYPE RANGE OF bukrs .
+
+  data GT_FCAT type LVC_T_FCAT .
+
+  methods CONSTRUCTOR
+    importing
+      !IT_BUKRS type LTY_BUKRS
+      !IV_GJAHR type GJAHR
+      !IV_PERIOD type CFIN_ACCIT-MONAT .
+  methods FETCH_DATA
+    exporting
+      !ET_DATA type TTY_PO_AMOUNT .
+  methods BUILD_FACT_DYN
+    importing
+      !IT_GL_PROFIT type TTY_GL_PROFIT
+    exporting
+      !ET_FCAT1 type LVC_T_FCAT .
+  methods PREPARE_DYN_TABLE
+    importing
+      !IT_GL_PROFIT type TTY_GL_PROFIT
+    exporting
+      !ET_DYNTABLE type STANDARD TABLE
+      !ES_DYNTABLE type ANY .
+  methods POPULATE_ITEM
+    importing
+      !IT_DATA type TTY_DATA
+      !IT_PO_AMOUNT type TTY_PO_AMOUNT
+      !IT_DATA_PRCNT type TTY_DATA .
+  methods CHECK_POST_FREIGHT_DOC
+    importing
+      !IV_BUKRS type BUKRS
+      !IV_GJAHR type GJAHR
+      !IV_POPER type CFIN_ACCIT-MONAT
+      !IV_EBELN type EBELN
+    exporting
+      !EV_DOCNR type DOCNR
+      !EV_BUDAT type BUDAT
+    returning
+      value(EV_POST_FREIGHT_DOC) type BOOLEAN .
+protected section.
+private section.
+
+  data GV_GJAHR type GJAHR .
+  data GT_BUKRS type LTY_BUKRS .
+  data GV_PERIOD type CFIN_ACCIT-MONAT .
+  data GV_DATE type SY-DATUM .
+  data GV_GL_POST type RACCT .
+  data GV_BLART type ACDOCA-BLART .
+  data GV_RLDNR type ACDOCA-RLDNR .
+ENDCLASS.
+
+
+
+CLASS ZFIN_CL_FREIGHT_SETTLEMENT IMPLEMENTATION.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Public Method ZFIN_CL_FREIGHT_SETTLEMENT->BUILD_FACT_DYN
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] IT_GL_PROFIT                   TYPE        TTY_GL_PROFIT
+* | [<---] ET_FCAT1                       TYPE        LVC_T_FCAT
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+METHOD build_fact_dyn.
+
+*&---------------------------------------------------------------------*
+*& DD ID        :                                                      *
+*& FS ID        :                                                      *
+*& User Stories : EWOW-35979                                           *
+*& Work Item    : 8000002137
+*&---------------------------------------------------------------------*
+*& Unallocated freight cost write off programme                        *
+*&---------------------------------------------------------------------*
+*& Transport: DA1K957018
+*&---------------------------------------------------------------------*
+*& Change Log:                                                         *
+*&---------------------------------------------------------------------*
+*& Author      ¦ Date           ¦ Comment                              *
+*&---------------------------------------------------------------------*
+*&*DEHVEDV      15/03/2023    : Initial Version                        *
+*&---------------------------------------------------------------------*
+*post unallocated freight cost to respective BU by Profitcenter and
+*G/l Accounts combination.                                             *
+*&---------------------------------------------------------------------*
+
+
+   TYPE-POOLS : slis.
+
+   DATA : lv_pos   TYPE i.
+   DATA : ls_fcat1 TYPE lvc_s_fcat.
+
+   ls_fcat1-col_pos = lv_pos + 1.
+
+   CLEAR : gt_fcat,lv_pos.
+   ls_fcat1-col_pos = lv_pos + 1.
+   lv_pos = lv_pos + 1.
+   ls_fcat1-fieldname = 'STATUS'.
+   ls_fcat1-reptext = 'Status'.
+
+   ls_fcat1-icon = abap_true.
+   APPEND ls_fcat1 TO gt_fcat.
+
+   ls_fcat1-col_pos = lv_pos + 1.
+   lv_pos = lv_pos + 1.
+   ls_fcat1-fieldname = 'BUKRS'.
+   ls_fcat1-reptext = 'CompanyCode'.
+   APPEND ls_fcat1 TO gt_fcat.
+
+   ls_fcat1-col_pos = lv_pos + 1.
+   lv_pos = lv_pos + 1.
+   ls_fcat1-fieldname = 'PURCHASEORDER'.
+   ls_fcat1-reptext = 'Purchaseorder'.
+   APPEND ls_fcat1 TO gt_fcat.
+
+   ls_fcat1-col_pos = lv_pos + 1.
+   lv_pos = lv_pos + 1.
+   ls_fcat1-fieldname = 'AMOUNT'.
+   ls_fcat1-reptext = 'Amount'.
+   ls_fcat1-do_sum = abap_true.
+   APPEND ls_fcat1 TO gt_fcat.
+
+   ls_fcat1-col_pos = lv_pos + 1.
+   lv_pos = lv_pos + 1.
+   ls_fcat1-fieldname = 'RHCUR'.
+   ls_fcat1-reptext = 'Currency'.
+   ls_fcat1-do_sum = abap_true.
+   APPEND ls_fcat1 TO gt_fcat.
+
+
+
+   LOOP AT it_gl_profit ASSIGNING FIELD-SYMBOL(<fs_gl_profit>).
+     ls_fcat1-fieldname = | { <fs_gl_profit>-prctr }{ <fs_gl_profit>-racct }|.
+     ls_fcat1-reptext = | { <fs_gl_profit>-prctr }{ '+' } { <fs_gl_profit>-racct }|.
+     CONDENSE ls_fcat1-fieldname.
+     ls_fcat1-col_pos = lv_pos + 1.
+     lv_pos = lv_pos + 1.
+     ls_fcat1-outputlen = '30'.
+     APPEND ls_fcat1 TO gt_fcat.
+   ENDLOOP.
+   et_fcat1 = gt_fcat.
+ ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Public Method ZFIN_CL_FREIGHT_SETTLEMENT->CHECK_POST_FREIGHT_DOC
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] IV_BUKRS                       TYPE        BUKRS
+* | [--->] IV_GJAHR                       TYPE        GJAHR
+* | [--->] IV_POPER                       TYPE        CFIN_ACCIT-MONAT
+* | [--->] IV_EBELN                       TYPE        EBELN
+* | [<---] EV_DOCNR                       TYPE        DOCNR
+* | [<---] EV_BUDAT                       TYPE        BUDAT
+* | [<-()] EV_POST_FREIGHT_DOC            TYPE        BOOLEAN
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD check_post_freight_doc.
+*&---------------------------------------------------------------------*
+*& Report ZFIN_CL_FREIGHT_SETTLEMENT
+*&---------------------------------------------------------------------*
+*&
+*&---------------------------------------------------------------------*
+*&---------------------------------------------------------------------*
+*& DD ID        :                                                      *
+*& FS ID        :                                                      *
+*& User Stories : EWOW-35979                                           *
+*& Work Item    : 8000002137
+*&---------------------------------------------------------------------*
+*& Unallocated freight cost write off programme                        *
+*&---------------------------------------------------------------------*
+*& Transport: DA1K957018
+*&---------------------------------------------------------------------*
+*& Change Log:                                                         *
+*&---------------------------------------------------------------------*
+*& Author      ¦ Date           ¦ Comment                              *
+*&---------------------------------------------------------------------*
+*&*DEHVEDV      15/03/2023    : Initial Version                        *
+*&---------------------------------------------------------------------*
+
+    CONSTANTS : lc_racct TYPE char7 VALUE 'Z_RACCT'.
+    DATA: lv_racct TYPE racct,
+          lv_sgtxt TYPE sgtxt.
+
+    lv_sgtxt = |{ iv_bukrs }{ iv_poper }{ iv_gjahr }-{ iv_ebeln }|.
+
+
+    SELECT SINGLE low FROM tvarvc INTO @lv_racct WHERE name = @lc_racct.
+    IF sy-subrc <> 0.
+      ev_post_freight_doc = abap_false.
+      RETURN.
+    ENDIF.
+
+    SELECT belnr,docln,rbukrs,budat,xreversed,xreversing,timestamp FROM acdoca INTO TABLE @DATA(lt_acdoca) WHERE rldnr EQ '0L'
+                                                     AND rbukrs EQ @iv_bukrs
+                                                     AND gjahr EQ @iv_gjahr
+                                                     AND poper EQ @iv_poper
+                                                     AND racct EQ @lv_racct
+                                                     AND sgtxt EQ @lv_sgtxt
+                                                     AND xreversing EQ @abap_false.                                              .
+    IF sy-subrc EQ 0.
+      SORT lt_acdoca BY timestamp DESCENDING.
+      READ TABLE lt_acdoca ASSIGNING FIELD-SYMBOL(<fs_acdoca>) INDEX 1.
+      IF sy-subrc EQ 0.
+        IF <fs_acdoca>-xreversed EQ abap_true.
+          ev_post_freight_doc =  abap_true.
+        ELSE.
+          ev_docnr = <fs_acdoca>-belnr.
+          ev_budat = <fs_acdoca>-budat.
+        ENDIF.
+      ENDIF.
+    ELSE.
+      ev_post_freight_doc = abap_true.
+    ENDIF.
+
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Public Method ZFIN_CL_FREIGHT_SETTLEMENT->CONSTRUCTOR
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] IT_BUKRS                       TYPE        LTY_BUKRS
+* | [--->] IV_GJAHR                       TYPE        GJAHR
+* | [--->] IV_PERIOD                      TYPE        CFIN_ACCIT-MONAT
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+METHOD constructor.
+*&---------------------------------------------------------------------*
+*& Report ZFIN_R_FREIGHT_SETTLEMENT
+*&---------------------------------------------------------------------*
+*&
+*&---------------------------------------------------------------------*
+*&---------------------------------------------------------------------*
+*& DD ID        :                                                      *
+*& FS ID        :                                                      *
+*& User Stories : EWOW-35979                                           *
+*& Work Item    : 8000002137
+*&---------------------------------------------------------------------*
+*& Unallocated freight cost write off programme                        *
+*&---------------------------------------------------------------------*
+*& Transport: DA1K957018
+*&---------------------------------------------------------------------*
+*& Change Log:                                                         *
+*&---------------------------------------------------------------------*
+*& Author      ¦ Date           ¦ Comment                              *
+*&---------------------------------------------------------------------*
+*&*DEHVEDV      15/03/2023    : Initial Version                        *
+*&---------------------------------------------------------------------*
+*post unallocated freight cost to respective BU by Profitcenter and
+*G/l Accounts combination.
+
+    CONSTANTS : lc_gl      TYPE char7 VALUE 'ZFIN_GL',
+                lc_blart   TYPE char9 VALUE 'ZFI_BLART',
+                lc_rldnr   TYPE char7 VALUE 'Z_RLDNR',
+                lc_gl_post TYPE char11 VALUE 'Z_RACCT'.
+
+    TYPES: BEGIN OF ty_low,
+             low TYPE char10,
+           END OF ty_low.
+
+    DATA : lt_low TYPE TABLE OF ty_low.
+    DATA : lt_rng TYPE RANGE OF char10.
+
+    DATA : lv_date TYPE d.
+*
+
+    gv_gjahr  = iv_gjahr.
+    gv_period = iv_period.
+    gt_bukrs  = it_bukrs.
+
+
+    gv_date = |{ iv_gjahr }{ iv_period }{ 01 }|.
+
+    "Ledger
+    SELECT SINGLE low FROM tvarvc INTO @DATA(lv_rldnr) WHERE name = @lc_rldnr.
+    IF sy-subrc = 0.
+      gv_rldnr =  lv_rldnr.
+    ENDIF.
+    "Doc_type
+    SELECT SINGLE low FROM tvarvc INTO @DATA(lv_blart) WHERE name = @lc_blart.
+    IF sy-subrc = 0.
+      gv_blart =  lv_blart.
+    ENDIF.
+
+    SELECT SINGLE low FROM tvarvc INTO @DATA(lv_credit_gl) WHERE name = @lc_gl_post.
+    IF sy-subrc = 0.
+      gv_gl_post = lv_credit_gl.
+    ENDIF.
+
+    "Gl for posting
+    SELECT low FROM tvarvc INTO TABLE @lt_low WHERE name = @lc_gl.
+    IF sy-subrc = 0.
+      lt_rng = VALUE #( FOR ls_rng IN lt_low ( sign = 'I' option = 'EQ' low = ls_rng-low ) ).
+    ENDIF.
+
+    "Credit GL
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Public Method ZFIN_CL_FREIGHT_SETTLEMENT->FETCH_DATA
+* +-------------------------------------------------------------------------------------------------+
+* | [<---] ET_DATA                        TYPE        TTY_PO_AMOUNT
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+METHOD fetch_data.
+*&---------------------------------------------------------------------*
+*& DD ID        :                                                      *
+*& FS ID        :                                                      *
+*& User Stories : EWOW-35979                                           *
+*& Work Item    : 8000002137
+*&---------------------------------------------------------------------*
+*& Unallocated freight cost write off programme                        *
+*&---------------------------------------------------------------------*
+*& Transport: DA1K957018
+*&---------------------------------------------------------------------*
+*& Change Log:                                                         *
+*&---------------------------------------------------------------------*
+*& Author      ¦ Date           ¦ Comment                              *
+*&---------------------------------------------------------------------*
+*&*DEHVEDV      15/03/2023    : Initial Version                        *
+*&---------------------------------------------------------------------*
+*post unallocated freight cost to respective BU by Profitcenter and
+*G/l Accounts combination.                                             *
+*&---------------------------------------------------------------------*
+
+  DATA : ls_po_amount TYPE ty_po_amount.
+
+  CONSTANTS : lc_racct TYPE char7 VALUE 'Z_RACCT',
+              lc_rldnr TYPE char7 VALUE 'Z_RLDNR',
+              lc_blart TYPE char7 VALUE 'Z_BLART'.
+
+  DATA : lv_index     TYPE i,
+         lv_date      TYPE d,
+         lv_startdate TYPE d,
+         lv_enddate   TYPE d.
+
+  SELECT SINGLE low FROM tvarvc INTO @DATA(lv_rldnr) WHERE name = @lc_rldnr.
+  IF sy-subrc <> 0.
+    CLEAR : lv_rldnr.
+  ENDIF.
+
+  SELECT SINGLE low FROM tvarvc INTO @DATA(lv_racct) WHERE name = @lc_racct.
+  IF sy-subrc <> 0.
+    CLEAR : lv_racct.
+  ENDIF.
+
+  SELECT SINGLE low FROM tvarvc INTO @DATA(lv_blart) WHERE name = @lc_blart.
+  IF sy-subrc <> 0.
+    CLEAR : lv_blart.
+  ENDIF.
+
+  SELECT rbukrs,
+         rhcur,
+         ebeln,
+         SUM( hsl ) AS hsl
+         FROM acdoca
+         INTO TABLE @DATA(lt_po)
+         WHERE rbukrs  IN @gt_bukrs
+         AND   rldnr = @lv_rldnr
+         AND   gjahr = @gv_gjahr
+         AND   blart = @lv_blart
+         AND   racct = @lv_racct
+         AND   poper = @gv_period
+         GROUP BY rbukrs,rhcur,ebeln.
+  IF sy-subrc = 0.
+    CLEAR : lv_index.
+    LOOP AT lt_po INTO DATA(ls_po).
+
+      check_post_freight_doc(
+        EXPORTING
+          iv_bukrs            =   ls_po-rbukrs           " Company Code
+          iv_gjahr            =   gv_gjahr                 " Fiscal Year
+          iv_poper            =   gv_period                " Posting period
+          iv_ebeln            =   ls_po-ebeln               " Purchasing Document Number
+        IMPORTING
+          ev_docnr            =  DATA(lv_docnr)
+          ev_budat            = DATA(lv_budat)
+        RECEIVING
+          ev_post_freight_doc =   DATA(lv_post_freight_flg)" Boolean Variable (X = True, - = False, Space = Unknown)
+      ).
+
+      ls_po_amount-index = lv_index + 1.
+      lv_index = lv_index + 1.
+      ls_po_amount-ebeln = ls_po-ebeln.
+      ls_po_amount-hsl = ls_po-hsl.
+      ls_po_amount-rhcur = ls_po-rhcur.
+      ls_po_amount-bukrs = ls_po-rbukrs.
+
+      IF lv_post_freight_flg IS INITIAL.
+        ls_po_amount-doc_posted = |{ 'Document: ' }{ lv_docnr }{ 'already posted on ' }{ lv_budat+6(2) }.{ lv_budat+4(2) }.{ lv_budat+0(4) }|.
+      ENDIF.
+
+      APPEND ls_po_amount TO et_data.
+      CLEAR : ls_po_amount.
+    ENDLOOP.
+  ENDIF.
+ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Public Method ZFIN_CL_FREIGHT_SETTLEMENT->POPULATE_ITEM
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] IT_DATA                        TYPE        TTY_DATA
+* | [--->] IT_PO_AMOUNT                   TYPE        TTY_PO_AMOUNT
+* | [--->] IT_DATA_PRCNT                  TYPE        TTY_DATA
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD populate_item.
+*&---------------------------------------------------------------------*
+*& Report ZFIN_CL_FREIGHT_SETTLEMENT
+*&---------------------------------------------------------------------*
+*&
+*&---------------------------------------------------------------------*
+*&---------------------------------------------------------------------*
+*& DD ID        :                                                      *
+*& FS ID        :                                                      *
+*& User Stories : EWOW-35979                                           *
+*& Work Item    : 8000002137
+*&---------------------------------------------------------------------*
+*& Unallocated freight cost write off programme                        *
+*&---------------------------------------------------------------------*
+*& Transport: DA1K957018
+*&---------------------------------------------------------------------*
+*& Change Log:                                                         *
+*&---------------------------------------------------------------------*
+*& Author      ¦ Date           ¦ Comment                              *
+*&---------------------------------------------------------------------*
+*&*DEHVEDV      15/03/2023    : Initial Version                        *
+*&---------------------------------------------------------------------*
+
+    DATA : lt_accgl    TYPE STANDARD TABLE OF  bapiacgl09,
+           lt_curramnt TYPE STANDARD TABLE OF bapiaccr09.
+
+    DATA : lv_counter    TYPE posnr_acc,
+           lv_curr_count TYPE posnr_acc,
+           lv_amount     TYPE acdoca-hsl.
+
+    CONSTANTS : lv_curr_11 TYPE char2 VALUE '11',
+                lv_curr_00 TYPE char2 VALUE '00'.
+
+    DATA : lv_gl       TYPE acdoca-racct,
+           lv_lastdate TYPE sy-datum,
+           lv_hsl      TYPE acdoca-hsl.
+
+    LOOP AT it_data INTO DATA(ls_data).
+      READ TABLE it_po_amount INTO DATA(ls_po_amount) WITH KEY ebeln = ls_data-ebeln.
+      IF sy-subrc = 0.
+        READ TABLE it_data_prcnt INTO DATA(ls_data_prcnt) WITH KEY ebeln = ls_data-ebeln.
+        IF sy-subrc = 0.
+          IF ls_po_amount-hsl LT 0.
+            lv_gl = '0057999900'.
+            lt_accgl = VALUE #( BASE lt_accgl ( itemno_acc = lv_counter
+                                              gl_account = |{ lv_gl ALPHA = IN }|
+                                              fisc_year  = sy-datum+0(4)
+                                              fis_period = sy-datum+4(2)
+                                              profit_ctr = 'DEFAULT'
+                                              doc_type   = 'SS'
+                                              po_number  = ls_data-ebeln
+                                              item_text  = |{ 'Freight writeoff' } { ls_data-ebeln }|
+                                              value_date = lv_lastdate ) )."last day of month
+
+            lv_hsl =  ls_po_amount-hsl * ( -1 ).
+
+            "Document Currency
+            lt_curramnt = VALUE #( BASE lt_curramnt ( itemno_acc = lv_curr_count
+                                                      curr_type = lv_curr_11
+                                                      currency_iso = ls_po_amount-rhcur "ls_data-rhcur
+                                                     " amt_doccur = ls_po_amount-hsl ) ).  "Local Currency 1
+                                                      amt_doccur =  lv_hsl ) ).  "Local Currency 1
+
+            lt_curramnt = VALUE #( BASE lt_curramnt ( itemno_acc = lv_curr_count
+                                                      curr_type = lv_curr_00
+                                                      currency_iso = ls_po_amount-rhcur
+                                                    "  amt_doccur = ls_po_amount-hsl ) ).  "Local Currency 1
+                                                      amt_doccur =  lv_hsl ) ).  "Local Currency 1
+
+            """'credit
+            LOOP AT it_data_prcnt INTO ls_data_prcnt WHERE ebeln = ls_data-ebeln.
+              lv_counter    = lv_counter + 1.
+              lv_curr_count = lv_curr_count + 1.
+
+              lt_accgl = VALUE #( BASE lt_accgl ( itemno_acc = lv_counter
+                                       gl_account = |{ ls_data_prcnt-racct ALPHA = IN }|
+                                       fisc_year  = sy-datum+0(4)
+                                       fis_period = sy-datum+4(2)
+                                       profit_ctr = ls_data_prcnt-prctr
+                                       po_number  = ls_data-ebeln
+                                       doc_type   = 'SS'
+                                       item_text  = |{ 'Freight writeoff' } { ls_data-ebeln }|
+                                       value_date = lv_lastdate ) )."last day of month
+
+              CONDENSE ls_data_prcnt-percnt.
+              lv_amount = ( ls_po_amount-hsl * ls_data_prcnt-percnt ) / 100 .
+              " lv_amount = lv_amount * ( -1 ).
+              "Document Currency
+              lt_curramnt = VALUE #( BASE lt_curramnt ( itemno_acc   = lv_curr_count
+                                                        curr_type    = lv_curr_11 " 11
+                                                        currency_iso = ls_po_amount-rhcur
+                                                        amt_doccur   = lv_amount ) ).  "Local Currency 1
+
+              lt_curramnt = VALUE #( BASE lt_curramnt ( itemno_acc   = lv_curr_count
+                                                       curr_type     = lv_curr_00    "00
+                                                       currency_iso  = ls_po_amount-rhcur
+                                                       amt_doccur    = lv_amount ) ) ."ls_data_final-rhcur ) ).
+
+            ENDLOOP.
+          ELSEIF ls_po_amount-hsl GT 0.
+
+            lv_gl = '0057999900'.
+
+            lt_accgl = VALUE #( BASE lt_accgl ( itemno_acc = lv_counter
+                                           gl_account = |{ lv_gl ALPHA = IN }|
+                                           fisc_year  = sy-datum+0(4)
+                                           fis_period = sy-datum+4(2)
+                                           profit_ctr = ' ' "lv_profitctr
+                                           doc_type   = 'SS'
+                                           po_number  = ls_data-ebeln
+                                           item_text  = |{ 'Freight writeoff' } { ls_data-ebeln }|
+                                           value_date = lv_lastdate ) )."last day of month
+
+            lv_hsl = ls_po_amount-hsl * ( -1 ).
+
+            "Document Currency
+            lt_curramnt = VALUE #( BASE lt_curramnt ( itemno_acc = lv_curr_count
+                                                      curr_type = lv_curr_11
+                                                      currency_iso = ls_po_amount-rhcur
+                                                     " amt_doccur = ls_po_amount-hsl ) ).  "Local Currency 1
+                                                      amt_doccur = lv_hsl ) ).  "Local Currency 1
+
+
+            lt_curramnt = VALUE #( BASE lt_curramnt ( itemno_acc = lv_curr_count
+                                                      curr_type = lv_curr_00
+                                                      currency_iso = ls_po_amount-rhcur
+                                                      amt_doccur = lv_hsl  ) ) .
+
+            """'credit
+            LOOP AT it_data_prcnt INTO ls_data_prcnt WHERE ebeln = ls_data-ebeln.
+              lv_counter = lv_counter + 1.
+              lv_curr_count = lv_curr_count + 1.
+              lt_accgl = VALUE #( BASE lt_accgl ( itemno_acc = lv_counter
+                                     gl_account = |{ ls_data_prcnt-racct ALPHA = IN }|
+                                     fisc_year  = sy-datum+0(4)
+                                     fis_period = sy-datum+4(2)
+                                     profit_ctr = ls_data_prcnt-prctr
+                                     doc_type   = 'SS'
+                                     item_text  = |{ 'Freight writeoff' } { ls_data-ebeln }|
+                                     po_number  = ls_data-ebeln
+                                     value_date = lv_lastdate ) )."last day of month
+
+              CONDENSE ls_data_prcnt-percnt.
+              lv_amount = ( ls_po_amount-hsl * ls_data_prcnt-percnt ) / 100 .
+              "  lv_amount = lv_amount * ( -1 ).
+              "Document Currency
+              lt_curramnt = VALUE #( BASE lt_curramnt ( itemno_acc = lv_curr_count
+                                                        curr_type = lv_curr_11
+                                                        currency_iso = ls_po_amount-rhcur
+                                                        amt_doccur = lv_amount  ) ).  "Local Currency 1
+
+              lt_curramnt = VALUE #( BASE lt_curramnt ( itemno_acc = lv_curr_count
+                                                       curr_type = lv_curr_00
+                                                       currency_iso = ls_po_amount-rhcur
+                                                       amt_doccur = lv_amount  ) ).  "Local Currency 1
+            ENDLOOP.
+            CLEAR : lv_hsl,ls_po_amount,lv_amount.
+          ENDIF.
+        ENDIF.
+      ENDIF.
+    ENDLOOP.
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Public Method ZFIN_CL_FREIGHT_SETTLEMENT->PREPARE_DYN_TABLE
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] IT_GL_PROFIT                   TYPE        TTY_GL_PROFIT
+* | [<---] ET_DYNTABLE                    TYPE        STANDARD TABLE
+* | [<---] ES_DYNTABLE                    TYPE        ANY
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD prepare_dyn_table.
+*&---------------------------------------------------------------------*
+*& Report ZFIN_CL_FREIGHT_SETTLEMENT
+*&---------------------------------------------------------------------*
+*&
+*&---------------------------------------------------------------------*
+*&---------------------------------------------------------------------*
+*& DD ID        :                                                      *
+*& FS ID        :                                                      *
+*& User Stories : EWOW-35979                                           *
+*& Work Item    : 8000002137
+*&---------------------------------------------------------------------*
+*& Unallocated freight cost write off programme                        *
+*&---------------------------------------------------------------------*
+*& Transport: DA1K957018
+*&---------------------------------------------------------------------*
+*& Change Log:                                                         *
+*&---------------------------------------------------------------------*
+*& Author      ¦ Date           ¦ Comment                              *
+*&---------------------------------------------------------------------*
+*&*DEHVEDV      15/03/2023    : Initial Version                        *
+*&---------------------------------------------------------------------*
+
+** Dynamic Table creation
+DATA: lo_struct   TYPE REF TO cl_abap_structdescr,
+      lo_element  TYPE REF TO cl_abap_elemdescr,
+      lo_new_type TYPE REF TO cl_abap_structdescr,
+      lo_new_tab  TYPE REF TO cl_abap_tabledescr,
+      lo_data     TYPE REF TO data,
+      lt_comp     TYPE cl_abap_structdescr=>component_table,
+      lt_tot_comp TYPE cl_abap_structdescr=>component_table,
+      la_comp     LIKE LINE OF lt_comp.
+
+ DATA : gt_table_data_dir  TYPE REF TO data,
+         gt_table_data_dir1 TYPE REF TO data,
+         gs_line_data_dir   TYPE REF TO data.
+
+ FIELD-SYMBOLS:<t_dyntable>  TYPE STANDARD TABLE." TABLE,
+FIELD-SYMBOLS:<t_dyntable2> TYPE STANDARD TABLE,
+              <fs_dyntable> TYPE any.
+*
+*  ls_fcat1-fieldname = 'BUKRS'.
+*  CONDENSE :ls_fcat1-fieldname.
+*   Element Description
+    lo_element ?= cl_abap_elemdescr=>describe_by_name( 'NAME1' ).
+    la_comp-name = 'BUKRS'.
+*   Field type
+    la_comp-type = cl_abap_elemdescr=>get_c( p_length = lo_element->length ).
+    APPEND la_comp TO lt_tot_comp.
+    CLEAR: la_comp.
+*
+*  ls_fcat1-fieldname = 'PURCHASEORDER'.
+*  CONDENSE :ls_fcat1-fieldname.
+*   Element Description
+    lo_element ?= cl_abap_elemdescr=>describe_by_name( 'NAME1' ).
+    la_comp-name = 'PURCHASEORDER'.
+*   Field type
+    la_comp-type = cl_abap_elemdescr=>get_c( p_length = lo_element->length ).
+    APPEND la_comp TO lt_tot_comp.
+    CLEAR: la_comp.
+*
+*  ls_fcat1-fieldname = 'AMOUNT'.
+*  CONDENSE :ls_fcat1-fieldname.
+*   Element Description
+    lo_element ?= cl_abap_elemdescr=>describe_by_name( 'NAME1' ).
+    " ls_comp-name = ls_fcat1-fieldname.
+     la_comp-name = 'AMOUNT'.
+*   Field type
+    la_comp-type = cl_abap_elemdescr=>get_c( p_length = lo_element->length ).
+    APPEND la_comp TO lt_tot_comp.
+    CLEAR: la_comp.
+*
+*  ls_fcat1-fieldname = 'RHCUR'.
+*  CONDENSE :ls_fcat1-fieldname.
+* Element Description
+    lo_element ?= cl_abap_elemdescr=>describe_by_name( 'NAME1' ).
+    " ls_comp-name = ls_fcat1-fieldname.
+     la_comp-name = 'RHCUR'.
+* Field type
+    la_comp-type = cl_abap_elemdescr=>get_c( p_length = lo_element->length ).
+    APPEND la_comp TO lt_tot_comp.
+    CLEAR: la_comp.
+     DATA(lt_gl_pr_temp) = it_gl_profit .
+      SORT lt_gl_pr_temp BY racct prctr.
+      DELETE ADJACENT DUPLICATES FROM lt_gl_pr_temp COMPARING  racct prctr.
+      DATA(lv_records) = lines( lt_gl_pr_temp ).
+
+    LOOP AT lt_gl_pr_temp ASSIGNING FIELD-SYMBOL(<fs_gl_profit>).
+*   Element Description
+      lo_element ?= cl_abap_elemdescr=>describe_by_name( 'NAME1' ).
+      " ls_comp-name = ls_fcat1-fieldname.
+      la_comp-name = | { <fs_gl_profit>-prctr }{ <fs_gl_profit>-racct }|.
+*   Field type
+      la_comp-type = cl_abap_elemdescr=>get_c( p_length = lo_element->length ).
+      APPEND la_comp TO lt_tot_comp.
+      CLEAR: la_comp.
+    ENDLOOP.
+
+    CALL METHOD cl_abap_structdescr=>create
+      EXPORTING
+        p_components = lt_tot_comp
+        p_strict     = cl_abap_structdescr=>false
+      RECEIVING
+        p_result     = DATA(gs_struct_descr_dir).
+
+**Create table TYPE based ON the structure
+
+    CALL METHOD cl_abap_tabledescr=>create
+      EXPORTING
+        p_line_type  = gs_struct_descr_dir
+        p_table_kind = cl_abap_tabledescr=>tablekind_std
+      RECEIVING
+        p_result     = DATA(gt_tab_descr_dir).
+
+
+    CALL METHOD cl_abap_tabledescr=>create
+      EXPORTING
+        p_line_type  = gs_struct_descr_dir
+        p_table_kind = cl_abap_tabledescr=>tablekind_std
+      RECEIVING
+        p_result     = DATA(gt_tab_descr_dir1).
+
+    CREATE DATA gt_table_data_dir TYPE HANDLE gt_tab_descr_dir.
+    CREATE DATA gt_table_data_dir1 TYPE HANDLE gt_tab_descr_dir.
+    ASSIGN gt_table_data_dir->* TO <t_dyntable>.
+
+    ASSIGN gt_table_data_dir1->* TO <t_dyntable2>.
+    CREATE DATA gs_line_data_dir TYPE HANDLE gs_struct_descr_dir.
+    ASSIGN gs_line_data_dir->* TO <fs_dyntable>.
+
+    es_dyntable = <fs_dyntable>.
+
+  ENDMETHOD.
+ENDCLASS.
