@@ -1,0 +1,15 @@
+MATERIAL	Types	MATNR	CHAR	40	0	0	Material Number
+BATCH	Types	ZP2P_BATCH	CHAR	30	0	0	Batch Number
+SSCC	Types	EXIDV	CHAR	20	0	0	External Handling Unit Identification
+PALLET_QUANTITY	Types		CHAR	12	0	0	Pallet Quantity
+SHIPMENT_ID	Types		CHAR	16	0	0	Shipment ID
+DESPATCH_ID	Types		CHAR	16	0	0	Despatch ID
+TIMESTAMP	Types		CHAR	20	0	0	Timestamp
+FIXED_VALUE	Types		CHAR	5	0	0	Fixed Value
+NO_OF_REELS	Types		CHAR	10	0	0	Number of Reels
+REEL_ID	Types		CHAR	70	0	0	Reel ID
+REEL_QUANTITY	Types		CHAR	12	0	0	Reel Quantity
+SUPPLIER_ID	Types	WERKS_D	CHAR	4	0	0	Plant
+FACTORY_ID	Types	LIFNR	CHAR	10	0	0	Account Number of Supplier
+PO_NUMBER	Types	EBELN	CHAR	10	0	0	Purchasing Document Number
+LINE_ITEM	Types		CHAR	6	0	0	Line item number
